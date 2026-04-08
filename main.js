@@ -9,9 +9,7 @@ input.addEventListener("keydown", e => {
 });
 
 async function zoek() {
-  const plaatsRaw = input.value.trim();
-  const plaats = plaatsRaw.toUpperCase();
-
+  const plaats = input.value.trim();
   resultaat.innerHTML = "";
   status.textContent = "";
 
@@ -20,28 +18,28 @@ async function zoek() {
   status.textContent = "Zoeken…";
 
   try {
-    // ✅ 1. BAG woonplaats PUNT (laag 0)
-    const bagUrl =
-      "https://basisregistraties.arcgisonline.nl/arcgis/rest/services/BAG/BAGv3/FeatureServer/0/query" +
+    // ✅ 1. World Geocoder (client-side toegestaan)
+    const geoUrl =
+      "https://geocode-api.arcgis.com/arcgis/rest/services/World/GeocodeServer/findAddressCandidates" +
       "?f=json" +
-      `&where=WPL_NAAM='${plaats}'` +
-      "&outFields=WPL_NAAM" +
-      "&returnGeometry=true";
+      `&singleLine=${encodeURIComponent(plaats)}` +
+      "&countryCode=NLD" +
+      "&maxLocations=1";
 
-    const bagRes = await fetch(bagUrl);
-    const bagData = await bagRes.json();
+    const geoRes = await fetch(geoUrl);
+    const geoData = await geoRes.json();
 
-    if (!bagData.features || bagData.features.length === 0) {
-      throw new Error("Geen Nederlandse woonplaats gevonden.");
+    if (!geoData.candidates || geoData.candidates.length === 0) {
+      throw new Error("Plaats niet gevonden.");
     }
 
-    const point = bagData.features[0].geometry;
+    const { x, y } = geoData.candidates[0].location;
 
-    // ✅ 2. PC4-vlakken rond dit punt (werkt perfect)
+    // ✅ 2. PC4-vlakken op basis van punt
     const pcUrl =
       "https://services.arcgis.com/nSZVuSZjHpEZZbRo/arcgis/rest/services/Postcodevlakken_PC4/FeatureServer/0/query" +
       "?f=json" +
-      `&geometry=${point.x},${point.y}` +
+      `&geometry=${x},${y}` +
       "&geometryType=esriGeometryPoint" +
       "&spatialRel=esriSpatialRelIntersects" +
       "&outFields=postcode4" +
@@ -50,6 +48,10 @@ async function zoek() {
     const pcRes = await fetch(pcUrl);
     const pcData = await pcRes.json();
 
+    if (!pcData.features || pcData.features.length === 0) {
+      throw new Error("Geen postcodes gevonden.");
+    }
+
     const postcodes = [
       ...new Set(pcData.features.map(f => f.attributes.postcode4))
     ].sort();
@@ -57,7 +59,7 @@ async function zoek() {
     status.textContent = "";
 
     resultaat.innerHTML = `
-      <h2>Postcodes (PC4) voor ${plaatsRaw}</h2>
+      <h2>Postcodes (PC4) voor ${plaats}</h2>
       <div class="postcodes">
         ${postcodes.map(pc => `<div class="postcode">${pc}</div>`).join("")}
       </div>
