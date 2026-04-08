@@ -1,160 +1,181 @@
 <!DOCTYPE html>
 <html lang="nl">
 <head>
-  <meta charset="UTF-8"/>
-  <meta name="viewport" content="width=device-width, initial-scale=1"/>
-  <title>Gemeente–Postcode Zoeker (PC4)</title>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Geavanceerde Gemeente & PC4 Zoeker</title>
 
-  <!-- ✅ Tailwind correct -->
+  <!-- ✅ Tailwind CSS correct geladen -->
   <script src="https://cdn.tailwindcss.com"></script>
 
   <!-- Leaflet -->
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
   <style>
-    #map { height: 420px; }
+    #map { height: 480px; }
   </style>
 </head>
 <body class="bg-gray-50 p-6 text-gray-900">
 
-<h1 class="text-3xl font-bold mb-4">Gemeente – Postcode (PC4)</h1>
+<h1 class="text-3xl font-bold mb-4">Gemeente & Postcode (PC4) Zoeker</h1>
 
-<div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
-  <input id="gemeente"
-         class="border p-2 rounded"
-         placeholder="Typ gemeentenaam en druk Enter (bijv. Utrecht)" />
+<div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
+  <input id="gemeente" list="gemeenten" class="border p-2 rounded" placeholder="Typ gemeentenaam…" />
+  <datalist id="gemeenten"></datalist>
 
-  <input id="pc4"
-         class="border p-2 rounded"
-         placeholder="PC4 (bijv. 1012)"
-         maxlength="4" />
+  <input id="pc4" class="border p-2 rounded" placeholder="PC4 (bijv. 1012)" maxlength="4" />
 
-  <button id="export"
-          class="bg-orange-500 text-white p-2 rounded">
-          Export CSV
-  </button>
+  <label class="flex items-center gap-2">
+    <input type="checkbox" id="togglePC4" checked /> PC4‑vlakken
+  </label>
+
+  <label class="flex items-center gap-2">
+    <input type="checkbox" id="toggleGemeente" checked /> Gemeentegrens
+  </label>
 </div>
 
+<button id="export" class="mb-4 bg-orange-500 text-white px-4 py-2 rounded">Export CSV</button>
+
 <div id="status" class="mb-3 font-medium"></div>
-<ul id="lijst" class="list-disc pl-5 mb-4"></ul>
-<div id="map"></div>
+<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+  <ul id="lijst" class="list-disc pl-5"></ul>
+  <div id="map"></div>
+</div>
 
 <script>
-/* ---------------- CONFIG ---------------- */
-const POSTCODEPUNTEN =
-  "https://services.arcgis.com/nSZVuSZjHpEZZbRo/arcgis/rest/services/Postcodepunten/FeatureServer/0/query";
+/* ================= CONFIG ================= */
+const POSTCODEPUNTEN = "https://services.arcgis.com/nSZVuSZjHpEZZbRo/arcgis/rest/services/Postcodepunten/FeatureServer/0/query";
+const PC4_VLAKKEN = "https://services.arcgis.com/nSZVuSZjHpEZZbRo/ArcGIS/rest/services/Postcodevlakken_PC4/FeatureServer/0/query";
+const GEMEENTE_GRENZEN = "https://services.arcgis.com/nSZVuSZjHpEZZbRo/ArcGIS/rest/services/CBS_Gemeente_actueel/FeatureServer/0/query";
 
-/* ---------------- MAP ---------------- */
-const map = L.map("map").setView([52.1, 5.1], 7);
+/* ================= MAP ================= */
+const map = L.map("map").setView([52.1,5.1],7);
 L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png").addTo(map);
-let layer = L.layerGroup().addTo(map);
+let puntLayer = L.layerGroup().addTo(map);
+let pc4Layer = null;
+let gemeenteLayer = null;
 
-/* ---------------- STATE ---------------- */
+/* ================= STATE ================= */
 let features = [];
+let page = 0;
+const PAGE_SIZE = 500;
 
-/* ---------------- ZOEK GEMEENTE ---------------- */
-document.getElementById("gemeente").addEventListener("keydown", async e => {
-  if (e.key !== "Enter") return;
-  document.getElementById("pc4").value = "";
-  await zoekGemeente(e.target.value.trim());
+/* ================= AUTOCOMPLETE GEMEENTEN ================= */
+(async () => {
+  const r = await fetch(POSTCODEPUNTEN + "?where=1=1&outFields=GM_NAAM&f=json");
+  const j = await r.json();
+  const set = [...new Set(j.features.map(f => f.attributes.GM_NAAM))].sort();
+  const dl = document.getElementById("gemeenten");
+  set.forEach(g => dl.innerHTML += `<option value="${g}">`);
+})();
+
+/* ================= ZOEK GEMEENTE ================= */
+document.getElementById("gemeente").addEventListener("keydown", e => {
+  if (e.key === "Enter") zoekGemeente(e.target.value.trim());
 });
 
 async function zoekGemeente(naam) {
+  reset();
   if (!naam) return;
-
-  document.getElementById("status").textContent = "Zoeken…";
-  document.getElementById("lijst").innerHTML = "";
-  layer.clearLayers();
-
-  const where =
-    `UPPER(GM_NAAM) LIKE '%${naam.toUpperCase()}%'`;
-
-  const url =
-    POSTCODEPUNTEN +
-    "?where=" + encodeURIComponent(where) +
-    "&outFields=PC4,GM_NAAM" +
-    "&returnGeometry=true&f=json";
-
-  const r = await fetch(url);
-  const j = await r.json();
-  features = j.features || [];
-
-  renderResult();
+  document.getElementById("status").textContent = "Zoeken in gemeente…";
+  const where = `UPPER(GM_NAAM) LIKE '%${naam.toUpperCase()}%'`;
+  await haalPostcodepunten(where);
+  toonGemeentegrens(naam);
 }
 
-/* ---------------- ZOEK PC4 ---------------- */
-document.getElementById("pc4").addEventListener("keydown", async e => {
-  if (e.key !== "Enter") return;
-  document.getElementById("gemeente").value = "";
-  await zoekPC4(e.target.value.trim());
+/* ================= ZOEK PC4 ================= */
+document.getElementById("pc4").addEventListener("keydown", e => {
+  if (e.key === "Enter" && e.target.value.length === 4)
+    haalPostcodepunten(`PC4='${e.target.value}'`);
 });
 
-async function zoekPC4(pc4) {
-  if (pc4.length !== 4) return;
-
-  document.getElementById("status").textContent = "Zoeken…";
-  document.getElementById("lijst").innerHTML = "";
-  layer.clearLayers();
-
-  const url =
-    POSTCODEPUNTEN +
-    "?where=" + encodeURIComponent(`PC4='${pc4}'`) +
-    "&outFields=PC4,GM_NAAM" +
-    "&returnGeometry=true&f=json";
-
-  const r = await fetch(url);
-  const j = await r.json();
-  features = j.features || [];
-
-  renderResult();
+/* ================= PAGING POSTCODEPUNTEN ================= */
+async function haalPostcodepunten(where) {
+  page = 0;
+  features = [];
+  let more = true;
+  while (more) {
+    const url = POSTCODEPUNTEN +
+      `?where=${encodeURIComponent(where)}` +
+      `&outFields=PC4,GM_NAAM&returnGeometry=true` +
+      `&resultOffset=${page * PAGE_SIZE}&resultRecordCount=${PAGE_SIZE}&f=json`;
+    const r = await fetch(url);
+    const j = await r.json();
+    features.push(...j.features);
+    more = j.features.length === PAGE_SIZE;
+    page++;
+  }
+  render();
 }
 
-/* ---------------- RENDER ---------------- */
-function renderResult() {
+/* ================= RENDER ================= */
+function render() {
   if (!features.length) {
-    document.getElementById("status").textContent =
-      "Geen resultaten gevonden.";
+    document.getElementById("status").textContent = "Geen resultaten.";
     return;
   }
+  document.getElementById("status").textContent = `${features.length} postcodepunten gevonden`;
+  const lijst = document.getElementById("lijst");
+  lijst.innerHTML = "";
+  puntLayer.clearLayers();
 
-  const uniekePC4 =
-    [...new Set(features.map(f => f.attributes.PC4))];
-
-  document.getElementById("status").textContent =
-    `${uniekePC4.length} PC4 gevonden`;
-
-  uniekePC4.forEach(p =>
-    document.getElementById("lijst").innerHTML += `<li>${p}</li>`
-  );
+  const pcs = [...new Set(features.map(f => f.attributes.PC4))];
+  pcs.forEach(p => lijst.innerHTML += `<li>${p}</li>`);
 
   features.forEach(f => {
-    L.circleMarker(
-      [f.geometry.y, f.geometry.x],
-      { radius: 5 }
-    )
-    .bindPopup(`${f.attributes.PC4}<br>${f.attributes.GM_NAAM}`)
-    .addTo(layer);
+    L.circleMarker([f.geometry.y, f.geometry.x],{radius:4})
+      .bindPopup(`${f.attributes.PC4}<br>${f.attributes.GM_NAAM}`)
+      .addTo(puntLayer);
   });
+  map.fitBounds(puntLayer.getBounds().pad(0.2));
 
-  map.fitBounds(layer.getBounds().pad(0.2));
+  if (document.getElementById("togglePC4").checked)
+    toonPC4Vlakken(pcs);
 }
 
-/* ---------------- EXPORT ---------------- */
+/* ================= PC4 VLAKKEN ================= */
+async function toonPC4Vlakken(pcs) {
+  if (pc4Layer) map.removeLayer(pc4Layer);
+  const where = `PC4 IN (${pcs.map(p=>`'${p}'`).join(",")})`;
+  const r = await fetch(PC4_VLAKKEN +
+    `?where=${encodeURIComponent(where)}&outFields=PC4&outSR=4326&f=geojson`);
+  const g = await r.json();
+  pc4Layer = L.geoJSON(g,{style:{color:"orange",weight:1,fillOpacity:0.2}}).addTo(map);
+}
+
+/* ================= GEMEENTE GRENS ================= */
+async function toonGemeentegrens(naam) {
+  if (!document.getElementById("toggleGemeente").checked) return;
+  if (gemeenteLayer) map.removeLayer(gemeenteLayer);
+  const r = await fetch(GEMEENTE_GRENZEN +
+    `?where=${encodeURIComponent(`UPPER(GM_NAAM) LIKE '%${naam.toUpperCase()}%'`)}` +
+    "&outFields=GM_NAAM&outSR=4326&f=geojson");
+  const g = await r.json();
+  gemeenteLayer = L.geoJSON(g,{style:{color:"blue",weight:2,fillOpacity:0}}).addTo(map);
+}
+
+/* ================= TOGGLES ================= */
+document.getElementById("togglePC4").onchange = () => pc4Layer && (map.hasLayer(pc4Layer) ? map.removeLayer(pc4Layer) : map.addLayer(pc4Layer));
+document.getElementById("toggleGemeente").onchange = () => gemeenteLayer && (map.hasLayer(gemeenteLayer) ? map.removeLayer(gemeenteLayer) : map.addLayer(gemeenteLayer));
+
+/* ================= EXPORT ================= */
 document.getElementById("export").onclick = () => {
-  if (!features.length) return;
-
   const rows = ["PC4,Gemeente"];
-  [...new Map(features.map(f =>
-     [f.attributes.PC4, f.attributes.GM_NAAM]))]
-    .forEach(([p,g]) => rows.push(`${p},${g}`));
-
+  [...new Map(features.map(f=>[f.attributes.PC4,f.attributes.GM_NAAM]))]
+    .forEach(([p,g])=>rows.push(`${p},${g}`));
   const blob = new Blob([rows.join("\n")],{type:"text/csv"});
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
   a.download = "pc4_resultaat.csv";
   a.click();
 };
+
+function reset(){
+  puntLayer.clearLayers();
+  pc4Layer && map.removeLayer(pc4Layer);
+  gemeenteLayer && map.removeLayer(gemeenteLayer);
+}
 </script>
 
 </body>
