@@ -2,339 +2,41 @@
 <html lang="nl">
 <head>
   <meta charset="UTF-8" />
+  <title>Postcodes per woonplaats (Nederland)</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Gemeente & Postcode (PC4) Zoeker Nederland</title>
-  <script src="https://cdn.tailwindcss.com"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.min.js"></script>
-  <style>
-    .pc4-row { 
-      padding: 12px;
-      background: #f3f4f6; 
-      margin: 4px 0; 
-      border-radius: 4px;
-      display: grid;
-      grid-template-columns: 1fr 2fr;
-      gap: 12px;
-      align-items: center;
-      border-left: 4px solid #3b82f6;
-    }
-  </style>
+  <meta name="description" content="Zoek alle postcodes (PC4) per Nederlandse woonplaats op basis van actuele BAG- en CBS-data." />
+  <link rel="stylesheet" href="style.css" />
 </head>
-<body class="bg-gray-50 p-4 md:p-6 text-gray-900">
+<body>
+  <main class="container">
+    <h1>Postcodes per woonplaats</h1>
+    <p class="intro">
+      Zoek Nederlandse woonplaatsen en krijg alle bijbehorende postcodes (PC4).
+      Gebaseerd op actuele open data (BAG & CBS).
+    </p>
 
-<div class="max-w-4xl mx-auto">
-  <h1 class="text-3xl md:text-4xl font-bold mb-2">Gemeente & Postcode (PC4) Zoeker</h1>
-  <p class="text-gray-600 mb-6">Zoek postcodes op gemeente of zoek gemeente op postcode in Nederland</p>
-
-  <!-- Search Controls -->
-  <div class="bg-white rounded-lg shadow p-4 md:p-6 mb-6">
-    <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
-      <div>
-        <label class="block text-sm font-medium mb-2">Zoek op gemeente</label>
-        <input 
-          id="gemeente" 
-          list="gemeenten" 
-          class="w-full border border-gray-300 p-3 rounded focus:ring-2 focus:ring-blue-500 outline-none" 
-          placeholder="Bijv. Amsterdam" 
-          autocomplete="off"
-        />
-        <datalist id="gemeenten"></datalist>
-      </div>
-
-      <div>
-        <label class="block text-sm font-medium mb-2">Of zoek op PC4</label>
-        <input 
-          id="pc4" 
-          class="w-full border border-gray-300 p-3 rounded focus:ring-2 focus:ring-blue-500 outline-none" 
-          placeholder="Bijv. 1012" 
-          maxlength="4" 
-          type="text"
-        />
-      </div>
-
-      <div class="flex items-end gap-2">
-        <button 
-          id="search" 
-          class="flex-1 bg-blue-600 text-white px-4 py-3 rounded font-medium hover:bg-blue-700 transition disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          Zoeken
-        </button>
-      </div>
-
-      <div class="flex items-end gap-2">
-        <button 
-          id="stop" 
-          class="flex-1 bg-red-600 text-white px-4 py-3 rounded font-medium hover:bg-red-700 transition hidden disabled:opacity-50"
-        >
-          ⏹ Stop
-        </button>
-        <button 
-          id="reset" 
-          class="flex-1 bg-gray-400 text-white px-4 py-3 rounded font-medium hover:bg-gray-500 transition"
-        >
-          Wissen
-        </button>
-      </div>
+    <div class="search">
+      <input
+        id="plaatsInput"
+        type="text"
+        placeholder="Bijvoorbeeld: Ermelo"
+        autocomplete="off"
+      />
+      <button id="zoekBtn">Zoeken</button>
     </div>
 
-    <div class="flex flex-wrap gap-4">
-      <button 
-        id="export" 
-        class="bg-orange-500 text-white px-4 py-2 rounded font-medium hover:bg-orange-600 transition disabled:opacity-50 disabled:cursor-not-allowed"
-        disabled
-      >
-        📥 Export naar Excel
-      </button>
-    </div>
-  </div>
+    <div id="status" class="status"></div>
 
-  <!-- Status & Results -->
-  <div id="status" class="mb-4 p-3 rounded bg-blue-50 text-blue-800 font-medium hidden"></div>
-  <div id="error" class="mb-4 p-3 rounded bg-red-50 text-red-800 font-medium hidden"></div>
+    <section id="resultaat" class="resultaat"></section>
+  </main>
 
-  <!-- Results Table -->
-  <div class="bg-white rounded-lg shadow p-6">
-    <h2 class="text-xl font-bold mb-4">Postcodes (<span id="count">0</span>)</h2>
-    <div id="results" class="space-y-2">
-      <p class="text-gray-500 text-sm">Zoek om resultaten te zien</p>
-    </div>
-  </div>
-</div>
+  <footer>
+    <p>
+      Data via BAG & CBS (ArcGIS) ·
+      Geen officiële postcodelijst van PostNL
+    </p>
+  </footer>
 
-<script>
-/* CONFIG */
-const POSTCODEPUNTEN = "https://services.arcgis.com/nSZVuSZjHpEZZbRo/arcgis/rest/services/Postcodepunten/FeatureServer/0/query";
-
-/* STATE */
-let allData = [];
-let features = [];
-let searchController = null;
-let isSearching = false;
-
-function showStatus(msg, type = "info") {
-  const statusEl = document.getElementById("status");
-  const errorEl = document.getElementById("error");
-  
-  if (type === "error") {
-    errorEl.textContent = msg;
-    errorEl.classList.remove("hidden");
-    statusEl.classList.add("hidden");
-  } else {
-    statusEl.textContent = msg;
-    statusEl.classList.remove("hidden");
-    errorEl.classList.add("hidden");
-  }
-}
-
-function hideStatus() {
-  document.getElementById("status").classList.add("hidden");
-  document.getElementById("error").classList.add("hidden");
-}
-
-function setSearching(state) {
-  isSearching = state;
-  document.getElementById("search").disabled = state;
-  document.getElementById("stop").classList.toggle("hidden", !state);
-  document.getElementById("gemeente").disabled = state;
-  document.getElementById("pc4").disabled = state;
-}
-
-/* LOAD ALL DATA ON PAGE LOAD */
-(async () => {
-  try {
-    showStatus("Bezig met laden van alle postcodes...");
-    const params = new URLSearchParams({
-      where: "1=1",
-      outFields: "PC4,GM_NAAM",
-      returnGeometry: false,
-      f: "json"
-    });
-    
-    const response = await fetch(`${POSTCODEPUNTEN}?${params.toString()}`);
-    const data = await response.json();
-    
-    if (data.error) throw new Error(data.error.message);
-    
-    allData = data.features || [];
-    console.log(`✅ Geladen: ${allData.length} records`);
-    
-    /* Populate gemeenten list */
-    const gemeenten = [...new Set(
-      allData.map(f => f.attributes?.GM_NAAM).filter(Boolean)
-    )].sort();
-    
-    const dl = document.getElementById("gemeenten");
-    gemeenten.forEach(g => {
-      const option = document.createElement("option");
-      option.value = g;
-      dl.appendChild(option);
-    });
-    
-    hideStatus();
-  } catch (err) {
-    showStatus(`Fout bij laden: ${err.message}`, "error");
-  }
-})();
-
-/* SEARCH */
-document.getElementById("gemeente").addEventListener("keydown", e => {
-  if (e.key === "Enter") performSearch();
-});
-
-document.getElementById("pc4").addEventListener("keydown", e => {
-  if (e.key === "Enter") performSearch();
-});
-
-document.getElementById("search").addEventListener("click", performSearch);
-
-document.getElementById("stop").addEventListener("click", stopSearch);
-
-document.getElementById("reset").addEventListener("click", () => {
-  document.getElementById("gemeente").value = "";
-  document.getElementById("pc4").value = "";
-  features = [];
-  hideStatus();
-  document.getElementById("results").innerHTML = '<p class="text-gray-500 text-sm">Zoek om resultaten te zien</p>';
-  document.getElementById("count").textContent = "0";
-  document.getElementById("export").disabled = true;
-  setSearching(false);
-});
-
-function stopSearch() {
-  if (searchController) {
-    searchController.abort();
-    setSearching(false);
-    showStatus("Zoekopdracht geannuleerd", "error");
-    console.log("Search cancelled");
-  }
-}
-
-async function performSearch() {
-  const gemeente = document.getElementById("gemeente").value.trim();
-  const pc4 = document.getElementById("pc4").value.trim().toUpperCase();
-
-  if (!gemeente && !pc4) {
-    showStatus("Voer alstublieft een gemeente of postcode in", "error");
-    return;
-  }
-
-  hideStatus();
-  showStatus("Zoeken…");
-  features = [];
-  setSearching(true);
-
-  /* Create abort controller for this search */
-  searchController = new AbortController();
-
-  try {
-    if (pc4.length === 4) {
-      /* Search by postcode - exact match */
-      features = allData.filter(f => {
-        if (searchController.signal.aborted) throw new Error("Aborted");
-        return f.attributes?.PC4?.trim() === pc4;
-      });
-    } else if (gemeente) {
-      /* Search by gemeente - case insensitive partial match */
-      features = allData.filter(f => {
-        if (searchController.signal.aborted) throw new Error("Aborted");
-        return f.attributes?.GM_NAAM?.toUpperCase().includes(gemeente.toUpperCase());
-      });
-    }
-    
-    /* Simulate some delay to show the stop button is working */
-    await new Promise(resolve => setTimeout(resolve, 100));
-    
-    if (searchController.signal.aborted) {
-      setSearching(false);
-      return;
-    }
-    
-    render();
-    setSearching(false);
-  } catch (err) {
-    if (err.message !== "Aborted") {
-      showStatus(`Fout bij zoeken: ${err.message}`, "error");
-      console.error(err);
-    }
-    setSearching(false);
-  }
-}
-
-function render() {
-  if (!features.length) {
-    showStatus("Geen postcodes gevonden.", "error");
-    document.getElementById("results").innerHTML = '<p class="text-gray-500 text-sm">Geen resultaten</p>';
-    document.getElementById("count").textContent = "0";
-    document.getElementById("export").disabled = true;
-    return;
-  }
-
-  hideStatus();
-  showStatus(`✅ ${features.length} postcodes gevonden`);
-  
-  const results = document.getElementById("results");
-  results.innerHTML = "";
-
-  const pc4Map = new Map();
-  features.forEach(f => {
-    const pc4 = f.attributes?.PC4?.trim();
-    const gemeente = f.attributes?.GM_NAAM?.trim();
-    if (pc4 && gemeente && !pc4Map.has(pc4)) {
-      pc4Map.set(pc4, gemeente);
-    }
-  });
-
-  const sortedPCs = Array.from(pc4Map.keys()).sort();
-  document.getElementById("count").textContent = sortedPCs.length;
-
-  sortedPCs.forEach(pc => {
-    const row = document.createElement("div");
-    row.className = "pc4-row";
-    row.innerHTML = `
-      <div><strong>${pc}</strong></div>
-      <div class="text-gray-700">${pc4Map.get(pc)}</div>
-    `;
-    results.appendChild(row);
-  });
-
-  document.getElementById("export").disabled = false;
-}
-
-/* EXPORT TO EXCEL */
-document.getElementById("export").onclick = () => {
-  if (features.length === 0) {
-    showStatus("Geen gegevens om te exporteren", "error");
-    return;
-  }
-
-  try {
-    const pc4Map = new Map();
-    features.forEach(f => {
-      const pc4 = f.attributes?.PC4?.trim();
-      const gemeente = f.attributes?.GM_NAAM?.trim();
-      if (pc4 && gemeente && !pc4Map.has(pc4)) {
-        pc4Map.set(pc4, gemeente);
-      }
-    });
-
-    const data = Array.from(pc4Map.entries()).map(([pc4, gemeente]) => ({
-      "Postcode (PC4)": pc4,
-      "Gemeente": gemeente
-    })).sort((a, b) => a["Postcode (PC4)"].localeCompare(b["Postcode (PC4)"]));
-
-    const ws = XLSX.utils.json_to_sheet(data);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "Postcodes");
-    ws['!cols'] = [{ wch: 15 }, { wch: 25 }];
-    
-    XLSX.writeFile(wb, `postcodes_${new Date().toISOString().split('T')[0]}.xlsx`);
-    showStatus("✅ Succesvol geëxporteerd naar Excel");
-  } catch (err) {
-    showStatus(`Fout bij export: ${err.message}`, "error");
-  }
-};
-
-</script>
-
+  <script src="main.js"></script>
 </body>
 </html>
