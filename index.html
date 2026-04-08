@@ -4,44 +4,38 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Gemeente & Postcode (PC4) Zoeker Nederland</title>
-
   <script src="https://cdn.tailwindcss.com"></script>
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  
-  <!-- SheetJS for Excel export -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.min.js"></script>
-
   <style>
-    #map { height: 600px; }
-    .pc4-item { 
-      padding: 8px 12px; 
+    .pc4-row { 
+      padding: 12px;
       background: #f3f4f6; 
       margin: 4px 0; 
       border-radius: 4px;
-      display: flex;
-      justify-content: space-between;
+      display: grid;
+      grid-template-columns: 1fr 2fr;
+      gap: 12px;
       align-items: center;
+      border-left: 4px solid #3b82f6;
     }
-    .loading { animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
   </style>
 </head>
 <body class="bg-gray-50 p-4 md:p-6 text-gray-900">
 
-<div class="max-w-7xl mx-auto">
+<div class="max-w-4xl mx-auto">
   <h1 class="text-3xl md:text-4xl font-bold mb-2">Gemeente & Postcode (PC4) Zoeker</h1>
   <p class="text-gray-600 mb-6">Zoek postcodes op gemeente of zoek gemeente op postcode in Nederland</p>
 
   <!-- Search Controls -->
   <div class="bg-white rounded-lg shadow p-4 md:p-6 mb-6">
-    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+    <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
       <div>
         <label class="block text-sm font-medium mb-2">Zoek op gemeente</label>
         <input 
           id="gemeente" 
           list="gemeenten" 
           class="w-full border border-gray-300 p-3 rounded focus:ring-2 focus:ring-blue-500 outline-none" 
-          placeholder="Typ gemeentenaam…" 
+          placeholder="Bijv. Amsterdam" 
           autocomplete="off"
         />
         <datalist id="gemeenten"></datalist>
@@ -61,9 +55,18 @@
       <div class="flex items-end gap-2">
         <button 
           id="search" 
-          class="flex-1 bg-blue-600 text-white px-4 py-3 rounded font-medium hover:bg-blue-700 transition"
+          class="flex-1 bg-blue-600 text-white px-4 py-3 rounded font-medium hover:bg-blue-700 transition disabled:opacity-50 disabled:cursor-not-allowed"
         >
           Zoeken
+        </button>
+      </div>
+
+      <div class="flex items-end gap-2">
+        <button 
+          id="stop" 
+          class="flex-1 bg-red-600 text-white px-4 py-3 rounded font-medium hover:bg-red-700 transition hidden disabled:opacity-50"
+        >
+          ⏹ Stop
         </button>
         <button 
           id="reset" 
@@ -75,17 +78,9 @@
     </div>
 
     <div class="flex flex-wrap gap-4">
-      <label class="flex items-center gap-2 cursor-pointer">
-        <input type="checkbox" id="togglePC4" checked class="w-4 h-4" />
-        <span>PC4-vlakken tonen</span>
-      </label>
-      <label class="flex items-center gap-2 cursor-pointer">
-        <input type="checkbox" id="toggleGemeente" checked class="w-4 h-4" />
-        <span>Gemeentegrens tonen</span>
-      </label>
       <button 
         id="export" 
-        class="bg-orange-500 text-white px-4 py-2 rounded font-medium hover:bg-orange-600 transition disabled:opacity-50"
+        class="bg-orange-500 text-white px-4 py-2 rounded font-medium hover:bg-orange-600 transition disabled:opacity-50 disabled:cursor-not-allowed"
         disabled
       >
         📥 Export naar Excel
@@ -97,49 +92,25 @@
   <div id="status" class="mb-4 p-3 rounded bg-blue-50 text-blue-800 font-medium hidden"></div>
   <div id="error" class="mb-4 p-3 rounded bg-red-50 text-red-800 font-medium hidden"></div>
 
-  <!-- Main Content -->
-  <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-    <!-- Results List -->
-    <div class="lg:col-span-1">
-      <div class="bg-white rounded-lg shadow p-6">
-        <h2 class="text-xl font-bold mb-4">Postcodes (<span id="count">0</span>)</h2>
-        <div id="lijst" class="space-y-2 max-h-96 overflow-y-auto">
-          <p class="text-gray-500 text-sm">Zoek om resultaten te zien</p>
-        </div>
-      </div>
-    </div>
-
-    <!-- Map -->
-    <div class="lg:col-span-2">
-      <div class="bg-white rounded-lg shadow overflow-hidden">
-        <div id="map" class="w-full"></div>
-      </div>
+  <!-- Results Table -->
+  <div class="bg-white rounded-lg shadow p-6">
+    <h2 class="text-xl font-bold mb-4">Postcodes (<span id="count">0</span>)</h2>
+    <div id="results" class="space-y-2">
+      <p class="text-gray-500 text-sm">Zoek om resultaten te zien</p>
     </div>
   </div>
 </div>
 
 <script>
-/* ================= CONFIG ================= */
-// Use the working endpoints with proper CORS support
+/* CONFIG */
 const POSTCODEPUNTEN = "https://services.arcgis.com/nSZVuSZjHpEZZbRo/arcgis/rest/services/Postcodepunten/FeatureServer/0/query";
-const PC4_VLAKKEN = "https://services.arcgis.com/nSZVuSZjHpEZZbRo/arcgis/rest/services/Postcodevlakken_PC4/FeatureServer/0/query";
-const GEMEENTE_GRENZEN = "https://services.arcgis.com/nSZVuSZjHpEZZbRo/arcgis/rest/services/CBS_Gemeente_actueel/FeatureServer/0/query";
 
-/* ================= MAP SETUP ================= */
-const map = L.map("map").setView([52.1, 5.1], 7);
-L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-  attribution: '&copy; OpenStreetMap contributors'
-}).addTo(map);
-
-let puntLayer = L.layerGroup().addTo(map);
-let pc4Layer = null;
-let gemeenteLayer = null;
-
-/* ================= STATE ================= */
+/* STATE */
+let allData = [];
 let features = [];
-const PAGE_SIZE = 500;
+let searchController = null;
+let isSearching = false;
 
-/* ================= UTILITY FUNCTIONS ================= */
 function showStatus(msg, type = "info") {
   const statusEl = document.getElementById("status");
   const errorEl = document.getElementById("error");
@@ -160,59 +131,52 @@ function hideStatus() {
   document.getElementById("error").classList.add("hidden");
 }
 
-/* ================= ARCGIS QUERY HELPER ================= */
-async function queryArcGISFeatures(url, where, outFields = "*") {
+function setSearching(state) {
+  isSearching = state;
+  document.getElementById("search").disabled = state;
+  document.getElementById("stop").classList.toggle("hidden", !state);
+  document.getElementById("gemeente").disabled = state;
+  document.getElementById("pc4").disabled = state;
+}
+
+/* LOAD ALL DATA ON PAGE LOAD */
+(async () => {
   try {
+    showStatus("Bezig met laden van alle postcodes...");
     const params = new URLSearchParams({
-      where: where || "1=1",
-      outFields: outFields,
-      returnGeometry: true,
+      where: "1=1",
+      outFields: "PC4,GM_NAAM",
+      returnGeometry: false,
       f: "json"
     });
     
-    const response = await fetch(`${url}?${params.toString()}`);
-    
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-    }
-    
+    const response = await fetch(`${POSTCODEPUNTEN}?${params.toString()}`);
     const data = await response.json();
     
-    if (data.error) {
-      throw new Error(data.error.message || "ArcGIS API Error");
-    }
+    if (data.error) throw new Error(data.error.message);
     
-    return data.features || [];
-  } catch (err) {
-    console.error("ArcGIS Query Error:", err);
-    throw err;
-  }
-}
-
-/* ================= AUTOCOMPLETE GEMEENTEN ================= */
-(async () => {
-  try {
-    const features = await queryArcGISFeatures(POSTCODEPUNTEN, "1=1", "GM_NAAM");
+    allData = data.features || [];
+    console.log(`✅ Geladen: ${allData.length} records`);
     
-    if (features && features.length > 0) {
-      const gemeenten = [...new Set(features
-        .map(f => f.attributes?.GM_NAAM)
-        .filter(name => name && name.trim())
-      )].sort();
-      
-      const dl = document.getElementById("gemeenten");
-      gemeenten.forEach(g => {
-        const option = document.createElement("option");
-        option.value = g;
-        dl.appendChild(option);
-      });
-    }
+    /* Populate gemeenten list */
+    const gemeenten = [...new Set(
+      allData.map(f => f.attributes?.GM_NAAM).filter(Boolean)
+    )].sort();
+    
+    const dl = document.getElementById("gemeenten");
+    gemeenten.forEach(g => {
+      const option = document.createElement("option");
+      option.value = g;
+      dl.appendChild(option);
+    });
+    
+    hideStatus();
   } catch (err) {
-    console.error("Fout bij laden gemeenten:", err);
+    showStatus(`Fout bij laden: ${err.message}`, "error");
   }
 })();
 
-/* ================= SEARCH HANDLERS ================= */
+/* SEARCH */
 document.getElementById("gemeente").addEventListener("keydown", e => {
   if (e.key === "Enter") performSearch();
 });
@@ -223,22 +187,33 @@ document.getElementById("pc4").addEventListener("keydown", e => {
 
 document.getElementById("search").addEventListener("click", performSearch);
 
+document.getElementById("stop").addEventListener("click", stopSearch);
+
 document.getElementById("reset").addEventListener("click", () => {
   document.getElementById("gemeente").value = "";
   document.getElementById("pc4").value = "";
   features = [];
-  resetMap();
   hideStatus();
-  document.getElementById("lijst").innerHTML = '<p class="text-gray-500 text-sm">Zoek om resultaten te zien</p>';
+  document.getElementById("results").innerHTML = '<p class="text-gray-500 text-sm">Zoek om resultaten te zien</p>';
   document.getElementById("count").textContent = "0";
   document.getElementById("export").disabled = true;
+  setSearching(false);
 });
 
-async function performSearch() {
-  const gemeenteVal = document.getElementById("gemeente").value.trim();
-  const pc4Val = document.getElementById("pc4").value.trim().toUpperCase();
+function stopSearch() {
+  if (searchController) {
+    searchController.abort();
+    setSearching(false);
+    showStatus("Zoekopdracht geannuleerd", "error");
+    console.log("Search cancelled");
+  }
+}
 
-  if (!gemeenteVal && !pc4Val) {
+async function performSearch() {
+  const gemeente = document.getElementById("gemeente").value.trim();
+  const pc4 = document.getElementById("pc4").value.trim().toUpperCase();
+
+  if (!gemeente && !pc4) {
     showStatus("Voer alstublieft een gemeente of postcode in", "error");
     return;
   }
@@ -246,35 +221,49 @@ async function performSearch() {
   hideStatus();
   showStatus("Zoeken…");
   features = [];
+  setSearching(true);
+
+  /* Create abort controller for this search */
+  searchController = new AbortController();
 
   try {
-    if (pc4Val.length === 4) {
-      // Search by postcode (PC4)
-      const where = `PC4='${pc4Val}'`;
-      const results = await queryArcGISFeatures(POSTCODEPUNTEN, where, "PC4,GM_NAAM");
-      features = results.map(f => ({ attributes: f.attributes, geometry: f.geometry }));
-    } else if (gemeenteVal) {
-      // Search by municipality name
-      const where = `UPPER(GM_NAAM) LIKE '%${gemeenteVal.toUpperCase()}%'`;
-      const results = await queryArcGISFeatures(POSTCODEPUNTEN, where, "PC4,GM_NAAM");
-      features = results.map(f => ({ attributes: f.attributes, geometry: f.geometry }));
-      
-      // Also show municipality borders
-      await toonGemeentegrens(gemeenteVal);
+    if (pc4.length === 4) {
+      /* Search by postcode - exact match */
+      features = allData.filter(f => {
+        if (searchController.signal.aborted) throw new Error("Aborted");
+        return f.attributes?.PC4?.trim() === pc4;
+      });
+    } else if (gemeente) {
+      /* Search by gemeente - case insensitive partial match */
+      features = allData.filter(f => {
+        if (searchController.signal.aborted) throw new Error("Aborted");
+        return f.attributes?.GM_NAAM?.toUpperCase().includes(gemeente.toUpperCase());
+      });
+    }
+    
+    /* Simulate some delay to show the stop button is working */
+    await new Promise(resolve => setTimeout(resolve, 100));
+    
+    if (searchController.signal.aborted) {
+      setSearching(false);
+      return;
     }
     
     render();
+    setSearching(false);
   } catch (err) {
-    showStatus(`Fout bij zoeken: ${err.message}`, "error");
-    console.error(err);
+    if (err.message !== "Aborted") {
+      showStatus(`Fout bij zoeken: ${err.message}`, "error");
+      console.error(err);
+    }
+    setSearching(false);
   }
 }
 
-/* ================= RENDER RESULTS ================= */
 function render() {
   if (!features.length) {
     showStatus("Geen postcodes gevonden.", "error");
-    document.getElementById("lijst").innerHTML = '<p class="text-gray-500 text-sm">Geen resultaten</p>';
+    document.getElementById("results").innerHTML = '<p class="text-gray-500 text-sm">Geen resultaten</p>';
     document.getElementById("count").textContent = "0";
     document.getElementById("export").disabled = true;
     return;
@@ -283,15 +272,13 @@ function render() {
   hideStatus();
   showStatus(`✅ ${features.length} postcodes gevonden`);
   
-  const lijst = document.getElementById("lijst");
-  lijst.innerHTML = "";
-  puntLayer.clearLayers();
+  const results = document.getElementById("results");
+  results.innerHTML = "";
 
-  // Get unique postcodes with their municipalities
   const pc4Map = new Map();
   features.forEach(f => {
-    const pc4 = f.attributes?.PC4;
-    const gemeente = f.attributes?.GM_NAAM;
+    const pc4 = f.attributes?.PC4?.trim();
+    const gemeente = f.attributes?.GM_NAAM?.trim();
     if (pc4 && gemeente && !pc4Map.has(pc4)) {
       pc4Map.set(pc4, gemeente);
     }
@@ -301,127 +288,19 @@ function render() {
   document.getElementById("count").textContent = sortedPCs.length;
 
   sortedPCs.forEach(pc => {
-    const item = document.createElement("div");
-    item.className = "pc4-item";
-    item.innerHTML = `
-      <div>
-        <strong>${pc}</strong>
-        <div class="text-xs text-gray-600">${pc4Map.get(pc)}</div>
-      </div>
-      <span class="text-xs bg-blue-500 text-white px-2 py-1 rounded">PC4</span>
+    const row = document.createElement("div");
+    row.className = "pc4-row";
+    row.innerHTML = `
+      <div><strong>${pc}</strong></div>
+      <div class="text-gray-700">${pc4Map.get(pc)}</div>
     `;
-    lijst.appendChild(item);
+    results.appendChild(row);
   });
-
-  // Add markers to map
-  features.forEach(f => {
-    if (f.geometry && (f.geometry.x !== undefined && f.geometry.y !== undefined)) {
-      const marker = L.circleMarker([f.geometry.y, f.geometry.x], {
-        radius: 6,
-        fillColor: "#3b82f6",
-        color: "#1e40af",
-        weight: 2,
-        opacity: 0.8,
-        fillOpacity: 0.7
-      }).bindPopup(`<strong>${f.attributes.PC4}</strong><br>${f.attributes.GM_NAAM}`);
-      
-      marker.addTo(puntLayer);
-    }
-  });
-
-  if (puntLayer.getLayers().length > 0) {
-    map.fitBounds(puntLayer.getBounds().pad(0.1));
-  }
-
-  if (document.getElementById("togglePC4").checked) {
-    const pcs = Array.from(pc4Map.keys());
-    toonPC4Vlakken(pcs);
-  }
 
   document.getElementById("export").disabled = false;
 }
 
-/* ================= PC4 VLAKKEN ================= */
-async function toonPC4Vlakken(pcs) {
-  try {
-    if (pc4Layer) map.removeLayer(pc4Layer);
-    
-    if (pcs.length === 0) return;
-
-    const where = `PC4 IN (${pcs.map(p => `'${p}'`).join(",")})`;
-    const features = await queryArcGISFeatures(PC4_VLAKKEN, where, "PC4");
-    
-    if (features && features.length > 0) {
-      const geojsonFeatures = features.map(f => ({
-        type: "Feature",
-        geometry: f.geometry,
-        properties: f.attributes
-      }));
-      
-      pc4Layer = L.geoJSON({ type: "FeatureCollection", features: geojsonFeatures }, {
-        style: {
-          color: "#f97316",
-          weight: 2,
-          opacity: 0.8,
-          fillOpacity: 0.15
-        }
-      }).addTo(map);
-    }
-  } catch (err) {
-    console.error("Fout bij laden PC4-vlakken:", err);
-  }
-}
-
-/* ================= GEMEENTE GRENS ================= */
-async function toonGemeentegrens(naam) {
-  try {
-    if (!document.getElementById("toggleGemeente").checked) return;
-    if (gemeenteLayer) map.removeLayer(gemeenteLayer);
-    
-    const where = `UPPER(GM_NAAM) LIKE '%${naam.toUpperCase()}%'`;
-    const features = await queryArcGISFeatures(GEMEENTE_GRENZEN, where, "GM_NAAM");
-    
-    if (features && features.length > 0) {
-      const geojsonFeatures = features.map(f => ({
-        type: "Feature",
-        geometry: f.geometry,
-        properties: f.attributes
-      }));
-      
-      gemeenteLayer = L.geoJSON({ type: "FeatureCollection", features: geojsonFeatures }, {
-        style: {
-          color: "#2563eb",
-          weight: 3,
-          opacity: 0.8,
-          fillOpacity: 0
-        }
-      }).addTo(map);
-    }
-  } catch (err) {
-    console.error("Fout bij laden gemeentegrens:", err);
-  }
-}
-
-/* ================= TOGGLES ================= */
-document.getElementById("togglePC4").onchange = function() {
-  if (!pc4Layer) return;
-  if (this.checked && !map.hasLayer(pc4Layer)) {
-    map.addLayer(pc4Layer);
-  } else if (!this.checked && map.hasLayer(pc4Layer)) {
-    map.removeLayer(pc4Layer);
-  }
-};
-
-document.getElementById("toggleGemeente").onchange = function() {
-  if (!gemeenteLayer) return;
-  if (this.checked && !map.hasLayer(gemeenteLayer)) {
-    map.addLayer(gemeenteLayer);
-  } else if (!this.checked && map.hasLayer(gemeenteLayer)) {
-    map.removeLayer(gemeenteLayer);
-  }
-};
-
-/* ================= EXPORT TO EXCEL ================= */
+/* EXPORT TO EXCEL */
 document.getElementById("export").onclick = () => {
   if (features.length === 0) {
     showStatus("Geen gegevens om te exporteren", "error");
@@ -429,48 +308,32 @@ document.getElementById("export").onclick = () => {
   }
 
   try {
-    // Create unique postcode list with municipality
     const pc4Map = new Map();
     features.forEach(f => {
-      const pc4 = f.attributes?.PC4;
-      const gemeente = f.attributes?.GM_NAAM;
+      const pc4 = f.attributes?.PC4?.trim();
+      const gemeente = f.attributes?.GM_NAAM?.trim();
       if (pc4 && gemeente && !pc4Map.has(pc4)) {
         pc4Map.set(pc4, gemeente);
       }
     });
 
-    // Convert to array for Excel
     const data = Array.from(pc4Map.entries()).map(([pc4, gemeente]) => ({
       "Postcode (PC4)": pc4,
       "Gemeente": gemeente
     })).sort((a, b) => a["Postcode (PC4)"].localeCompare(b["Postcode (PC4)"]));
 
-    // Create workbook
     const ws = XLSX.utils.json_to_sheet(data);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Postcodes");
-    
-    // Style headers
     ws['!cols'] = [{ wch: 15 }, { wch: 25 }];
     
-    // Download
     XLSX.writeFile(wb, `postcodes_${new Date().toISOString().split('T')[0]}.xlsx`);
     showStatus("✅ Succesvol geëxporteerd naar Excel");
   } catch (err) {
     showStatus(`Fout bij export: ${err.message}`, "error");
-    console.error(err);
   }
 };
 
-/* ================= RESET MAP ================= */
-function resetMap() {
-  puntLayer.clearLayers();
-  if (pc4Layer) map.removeLayer(pc4Layer);
-  if (gemeenteLayer) map.removeLayer(gemeenteLayer);
-  pc4Layer = null;
-  gemeenteLayer = null;
-  map.setView([52.1, 5.1], 7);
-}
 </script>
 
 </body>
