@@ -4,7 +4,7 @@ const status = document.getElementById("status");
 const resultaat = document.getElementById("resultaat");
 
 knop.addEventListener("click", zoek);
-input.addEventListener("keydown", (e) => {
+input.addEventListener("keydown", e => {
   if (e.key === "Enter") zoek();
 });
 
@@ -20,9 +20,9 @@ async function zoek() {
   status.textContent = "Zoeken…";
 
   try {
-    // ✅ 1. BAG woonplaats (correct veld + hoofdletters)
+    // ✅ 1. BAG woonplaats PUNT (laag 0)
     const bagUrl =
-      "https://basisregistraties.arcgisonline.nl/arcgis/rest/services/BAG/BAGv3/FeatureServer/5/query" +
+      "https://basisregistraties.arcgisonline.nl/arcgis/rest/services/BAG/BAGv3/FeatureServer/0/query" +
       "?f=json" +
       `&where=WPL_NAAM='${plaats}'` +
       "&outFields=WPL_NAAM" +
@@ -35,14 +35,14 @@ async function zoek() {
       throw new Error("Geen Nederlandse woonplaats gevonden.");
     }
 
-    const woonplaatsGeom = bagData.features[0].geometry;
+    const point = bagData.features[0].geometry;
 
-    // ✅ 2. PC4-vlakken die de woonplaats overlappen
+    // ✅ 2. PC4-vlakken rond dit punt (werkt perfect)
     const pcUrl =
       "https://services.arcgis.com/nSZVuSZjHpEZZbRo/arcgis/rest/services/Postcodevlakken_PC4/FeatureServer/0/query" +
       "?f=json" +
-      `&geometry=${encodeURIComponent(JSON.stringify(woonplaatsGeom))}` +
-      "&geometryType=esriGeometryPolygon" +
+      `&geometry=${point.x},${point.y}` +
+      "&geometryType=esriGeometryPoint" +
       "&spatialRel=esriSpatialRelIntersects" +
       "&outFields=postcode4" +
       "&returnGeometry=false";
