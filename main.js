@@ -10,62 +10,31 @@ input.addEventListener("keydown", e => {
 
 async function zoek() {
   const plaats = input.value.trim();
-  resultaat.innerHTML = "";
-  status.textContent = "";
-
   if (!plaats) return;
 
-  status.textContent = "Zoeken…";
+  status.textContent = "Postcodes ophalen…";
+  resultaat.innerHTML = "";
 
   try {
-    // ✅ 1. World Geocoder (client-side toegestaan)
-    const geoUrl =
-      "https://geocode-api.arcgis.com/arcgis/rest/services/World/GeocodeServer/findAddressCandidates" +
-      "?f=json" +
-      `&singleLine=${encodeURIComponent(plaats)}` +
-      "&countryCode=NLD" +
-      "&maxLocations=1";
+    const res = await fetch(
+      `https://postcode-api.jouwnaam.workers.dev/?plaats=${encodeURIComponent(plaats)}`
+    );
+    const data = await res.json();
 
-    const geoRes = await fetch(geoUrl);
-    const geoData = await geoRes.json();
-
-    if (!geoData.candidates || geoData.candidates.length === 0) {
-      throw new Error("Plaats niet gevonden.");
+    if (data.error) {
+      status.textContent = data.error;
+      return;
     }
 
-    const { x, y } = geoData.candidates[0].location;
-
-    // ✅ 2. PC4-vlakken op basis van punt
-    const pcUrl =
-      "https://services.arcgis.com/nSZVuSZjHpEZZbRo/arcgis/rest/services/Postcodevlakken_PC4/FeatureServer/0/query" +
-      "?f=json" +
-      `&geometry=${x},${y}` +
-      "&geometryType=esriGeometryPoint" +
-      "&spatialRel=esriSpatialRelIntersects" +
-      "&outFields=postcode4" +
-      "&returnGeometry=false";
-
-    const pcRes = await fetch(pcUrl);
-    const pcData = await pcRes.json();
-
-    if (!pcData.features || pcData.features.length === 0) {
-      throw new Error("Geen postcodes gevonden.");
-    }
-
-    const postcodes = [
-      ...new Set(pcData.features.map(f => f.attributes.postcode4))
-    ].sort();
-
-    status.textContent = "";
+    status.textContent = `${data.aantal} postcodes gevonden`;
 
     resultaat.innerHTML = `
-      <h2>Postcodes (PC4) voor ${plaats}</h2>
+      <h2>Postcodes (PC6) voor ${data.plaats}</h2>
       <div class="postcodes">
-        ${postcodes.map(pc => `<div class="postcode">${pc}</div>`).join("")}
+        ${data.postcodes.map(pc => `<div class="postcode">${pc}</div>`).join("")}
       </div>
     `;
   } catch (err) {
-    console.error(err);
-    status.textContent = err.message || "Er ging iets mis.";
+    status.textContent = "Ophalen mislukt.";
   }
 }
