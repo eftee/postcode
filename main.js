@@ -9,20 +9,23 @@ input.addEventListener("keydown", (e) => {
 });
 
 async function zoek() {
-  const plaats = input.value.trim();
+  const plaatsRaw = input.value.trim();
+  const plaats = plaatsRaw.toUpperCase();
+
   resultaat.innerHTML = "";
+  status.textContent = "";
 
   if (!plaats) return;
 
   status.textContent = "Zoeken…";
 
   try {
-    // 1. BAG woonplaats ophalen (polygon)
+    // ✅ 1. BAG woonplaats (correct veld + hoofdletters)
     const bagUrl =
       "https://basisregistraties.arcgisonline.nl/arcgis/rest/services/BAG/BAGv3/FeatureServer/5/query" +
-      "?f=pjson" +
-      `&where=woonplaatsnaam='${plaats}'` +
-      "&outFields=woonplaatsnaam" +
+      "?f=json" +
+      `&where=WPL_NAAM='${plaats}'` +
+      "&outFields=WPL_NAAM" +
       "&returnGeometry=true";
 
     const bagRes = await fetch(bagUrl);
@@ -32,14 +35,13 @@ async function zoek() {
       throw new Error("Geen Nederlandse woonplaats gevonden.");
     }
 
-    const woonplaats = bagData.features[0];
-    const geom = woonplaats.geometry;
+    const woonplaatsGeom = bagData.features[0].geometry;
 
-    // 2. PC4-vlakken intersecteren met woonplaats
+    // ✅ 2. PC4-vlakken die de woonplaats overlappen
     const pcUrl =
       "https://services.arcgis.com/nSZVuSZjHpEZZbRo/arcgis/rest/services/Postcodevlakken_PC4/FeatureServer/0/query" +
-      "?f=pjson" +
-      `&geometry=${encodeURIComponent(JSON.stringify(geom))}` +
+      "?f=json" +
+      `&geometry=${encodeURIComponent(JSON.stringify(woonplaatsGeom))}` +
       "&geometryType=esriGeometryPolygon" +
       "&spatialRel=esriSpatialRelIntersects" +
       "&outFields=postcode4" +
@@ -55,12 +57,13 @@ async function zoek() {
     status.textContent = "";
 
     resultaat.innerHTML = `
-      <h2>Postcodes (PC4) voor ${plaats}</h2>
+      <h2>Postcodes (PC4) voor ${plaatsRaw}</h2>
       <div class="postcodes">
         ${postcodes.map(pc => `<div class="postcode">${pc}</div>`).join("")}
       </div>
     `;
   } catch (err) {
+    console.error(err);
     status.textContent = err.message || "Er ging iets mis.";
   }
 }
