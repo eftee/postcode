@@ -1,229 +1,125 @@
-
 <!DOCTYPE html>
 <html lang="nl">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Postcode Analyse – Gemeente & PC4 (BAG)</title>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Gemeente & Postcode Zoeker</title>
 
-  <!-- Tailwind CSS (CDN, prima voor demo/SharePoint) -->
-<script src="https://cdn.tailwindcss.com"></script>
+  <!-- ✅ Tailwind correct -->
+  <script src="https://cdn.tailwindcss.com"></script>
 
   <!-- Leaflet -->
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
   <style>
-    :root { --rabo-orange: #FF6600; }
-    #map { height: 420px; }
+    #map { height: 420px }
   </style>
 </head>
-<body class="bg-gray-50 text-gray-900">
+<body class="bg-gray-50 p-6">
 
-<div class="max-w-6xl mx-auto p-6">
-  <h1 class="text-3xl font-bold mb-2" style="color: var(--rabo-orange)">
-    Postcode Analyse (PC4) – Gemeente & BAG
-  </h1>
-  <p class="mb-6">Zoek op gemeentenaam of PC4. Bron: BAG Postcodepunten (Esri Nederland).</p>
+<h1 class="text-3xl font-bold mb-4">Gemeente – Postcode (PC4)</h1>
 
-  <!-- Controls -->
-  <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-    <div>
-      <label class="font-semibold">Gemeente</label>
-      <select id="city" class="mt-1 w-full border p-2 rounded">
-        <option value="">– kies –</option>
-      </select>
-    </div>
-
-    <div>
-      <label class="font-semibold">Zoek postcode (PC4)</label>
-      <input id="postcode" class="mt-1 w-full border p-2 rounded" placeholder="1012" maxlength="4" />
-    </div>
-
-    <div class="flex items-end gap-2">
-      <button id="btnCsv" class="px-4 py-2 rounded text-white" style="background: var(--rabo-orange)">
-        Export CSV
-      </button>
-    </div>
-  </div>
-
-  <!-- Result -->
-  <div id="result" class="mb-4 p-4 rounded bg-white shadow">Maak een selectie.</div>
-
-  <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-    <div>
-      <h2 class="font-bold mb-2">PC4‑postcodes</h2>
-      <ul id="postcodeList" class="bg-white p-3 rounded shadow max-h-72 overflow-auto"></ul>
-    </div>
-
-    <div>
-      <h2 class="font-bold mb-2">Kaart</h2>
-      <div id="map" class="rounded"></div>
-    </div>
-  </div>
-
-  <p class="text-xs text-gray-600 mt-6">
-    Bron: Esri Nederland – BAG Postcodepunten. Gebruik conform Esri NL Terms of Use.
-  </p>
+<div class="grid grid-cols-3 gap-4 mb-4">
+  <select id="gemeente" class="border p-2 rounded"></select>
+  <input id="pc4" class="border p-2 rounded" placeholder="1012"/>
+  <button id="export" class="bg-orange-500 text-white p-2 rounded">Export CSV</button>
 </div>
 
+<div id="result" class="mb-3"></div>
+<ul id="lijst" class="mb-4 list-disc pl-5"></ul>
+<div id="map"></div>
+
 <script>
-  /* =====================
-     Config
-  ===================== */
-  const SERVICE_URL = "https://services.arcgis.com/nSZVuSZjHpEZZbRo/ArcGIS/rest/services/Postcodepunten/FeatureServer/0/query";
+/* ---- CONFIG ---- */
+const POSTCODEPUNTEN =
+  "https://services.arcgis.com/nSZVuSZjHpEZZbRo/arcgis/rest/services/Postcodepunten/FeatureServer/0/query";
+const PC4_VLAKKEN =
+  "https://services.arcgis.com/nSZVuSZjHpEZZbRo/ArcGIS/rest/services/Postcodevlakken_PC4/FeatureServer/0/query";
 
-  /* =====================
-     State
-  ===================== */
-  let lastFeatures = [];
-  let markerLayer = null;
+/* ---- MAP ---- */
+const map = L.map("map").setView([52.1,5.1],7);
+L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png").addTo(map);
 
-  /* =====================
-     DOM
-  ===================== */
-  const citySelect = document.getElementById('city');
-  const postcodeInput = document.getElementById('postcode');
-  const resultDiv = document.getElementById('result');
-  const listEl = document.getElementById('postcodeList');
+let features = [];
+let layerGroup = L.layerGroup().addTo(map);
 
-  /* =====================
-     Map
-  ===================== */
-  const map = L.map('map').setView([52.1, 5.1], 7);
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    attribution: '© OpenStreetMap'
-  }).addTo(map);
+/* ---- GEMEENTEN LADEN ---- */
+(async () => {
+  const r = await fetch(
+    POSTCODEPUNTEN +
+    "?where=1=1&outFields=GM_NAAM&f=json"
+  );
+  const j = await r.json();
+  const set = [...new Set(j.features.map(f => f.attributes.GM_NAAM))].sort();
 
-  /* =====================
-     Init: laad gemeenten
-  ===================== */
-  loadGemeenten();
+  const sel = document.getElementById("gemeente");
+  sel.innerHTML = "<option value=''>Kies gemeente</option>";
+  set.forEach(g => sel.innerHTML += `<option>${g}</option>`);
+})();
 
-  async function loadGemeenten() {
-    const url = SERVICE_URL + "?where=1=1&outFields=Gemeentenaam&returnDistinctValues=true&f=json";
-    const data = await fetch(url).then(r => r.json());
+/* ---- ZOEK OP GEMEENTE ---- */
+document.getElementById("gemeente").onchange = async e => {
+  if (!e.target.value) return;
+  document.getElementById("pc4").value = "";
 
-    const gemeenten = [...new Set(data.features.map(f => f.attributes.Gemeentenaam))]
-      .filter(Boolean)
-      .sort();
+  const q =
+    POSTCODEPUNTEN +
+    "?where=" + encodeURIComponent(`GM_NAAM='${e.target.value}'`) +
+    "&outFields=PC4,GM_NAAM&returnGeometry=true&f=json";
 
-    gemeenten.forEach(g => {
-      const opt = document.createElement('option');
-      opt.value = g;
-      opt.textContent = g;
-      citySelect.appendChild(opt);
-    });
-  }
+  const r = await fetch(q);
+  const j = await r.json();
+  features = j.features;
+  render(`PC4 in ${e.target.value}`);
+};
 
-  /* =====================
-     Zoeken op gemeente
-  ===================== */
-  async function loadGemeente(gemeente) {
-    postcodeInput.value = '';
-    resultDiv.textContent = 'Bezig met laden…';
-    listEl.innerHTML = '';
+/* ---- ZOEK OP PC4 ---- */
+document.getElementById("pc4").onchange = async e => {
+  if (e.target.value.length !== 4) return;
 
-    const url = SERVICE_URL
-      + '?where=' + encodeURIComponent(`Gemeentenaam='${gemeente}'`)
-      + '&outFields=PC4,Gemeentenaam'
-      + '&returnGeometry=true'
-      + '&f=json';
+  const q =
+    POSTCODEPUNTEN +
+    "?where=" + encodeURIComponent(`PC4='${e.target.value}'`) +
+    "&outFields=PC4,GM_NAAM&returnGeometry=true&f=json";
 
-    const data = await fetch(url).then(r => r.json());
-    lastFeatures = data.features;
+  const r = await fetch(q);
+  const j = await r.json();
+  features = j.features;
+  render(`Resultaat voor PC4 ${e.target.value}`);
+};
 
-    renderResult(gemeente);
-  }
+/* ---- RENDER ---- */
+function render(titel) {
+  document.getElementById("result").textContent = titel;
+  document.getElementById("lijst").innerHTML = "";
+  layerGroup.clearLayers();
 
-  /* =====================
-     Zoeken op PC4
-  ===================== */
-  async function loadPostcode(pc4) {
-    citySelect.value = '';
-    resultDiv.textContent = 'Bezig met laden…';
-    listEl.innerHTML = '';
+  const pcs = [...new Set(features.map(f => f.attributes.PC4))];
+  pcs.forEach(p => document.getElementById("lijst").innerHTML += `<li>${p}</li>`);
 
-    const url = SERVICE_URL
-      + '?where=' + encodeURIComponent(`PC4='${pc4}'`)
-      + '&outFields=PC4,Gemeentenaam'
-      + '&returnGeometry=true'
-      + '&f=json';
-
-    const data = await fetch(url).then(r => r.json());
-    lastFeatures = data.features;
-
-    renderResult();
-  }
-
-  /* =====================
-     Render
-  ===================== */
-  function renderResult(gekozenGemeente) {
-    const pc4s = [...new Set(lastFeatures.map(f => f.attributes.PC4))].sort();
-
-    pc4s.forEach(pc => {
-      const li = document.createElement('li');
-      li.textContent = pc;
-      listEl.appendChild(li);
-    });
-
-    if (markerLayer) markerLayer.remove();
-    markerLayer = L.layerGroup();
-
-    lastFeatures.forEach(f => {
-      const { x, y } = f.geometry;
-      const pc4 = f.attributes.PC4;
-      const gem = f.attributes.Gemeentenaam;
-      L.circleMarker([y, x], { radius: 5, color: '#FF6600' })
-        .bindPopup(`PC4: ${pc4}<br>Gemeente: ${gem}`)
-        .addTo(markerLayer);
-    });
-
-    markerLayer.addTo(map);
-    if (markerLayer.getLayers().length > 0) {
-      map.fitBounds(markerLayer.getBounds().pad(0.2));
-    }
-
-    if (gekozenGemeente) {
-      resultDiv.textContent = `${pc4s.length} PC4‑postcodes gevonden in ${gekozenGemeente}.`;
-    } else if (pc4s.length === 1) {
-      resultDiv.textContent = `PC4 ${pc4s[0]} ligt in gemeente ${lastFeatures[0].attributes.Gemeentenaam}.`;
-    } else {
-      resultDiv.textContent = `${pc4s.length} resultaten gevonden.`;
-    }
-  }
-
-  /* =====================
-     Export CSV
-  ===================== */
-  document.getElementById('btnCsv').addEventListener('click', () => {
-    if (!lastFeatures.length) return alert('Geen data om te exporteren');
-
-    const rows = ['PC4,Gemeente'];
-    [...new Map(lastFeatures.map(f => [f.attributes.PC4, f.attributes.Gemeentenaam])).entries()]
-      .forEach(([pc4, gem]) => rows.push(`${pc4},${gem}`));
-
-    const blob = new Blob([rows.join('\n')], { type: 'text/csv' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'postcode_resultaten.csv';
-    a.click();
-    URL.revokeObjectURL(url);
+  features.forEach(f => {
+    L.circleMarker([f.geometry.y, f.geometry.x], {radius:5})
+     .bindPopup(`${f.attributes.PC4} – ${f.attributes.GM_NAAM}`)
+     .addTo(layerGroup);
   });
 
-  /* =====================
-     Events
-  ===================== */
-  citySelect.addEventListener('change', () => {
-    if (citySelect.value) loadGemeente(citySelect.value);
-  });
+  if (layerGroup.getLayers().length)
+    map.fitBounds(layerGroup.getBounds().pad(0.2));
+}
 
-  postcodeInput.addEventListener('change', () => {
-    if (postcodeInput.value.length === 4) loadPostcode(postcodeInput.value);
-  });
+/* ---- EXPORT ---- */
+document.getElementById("export").onclick = () => {
+  if (!features.length) return;
+  const rows = ["PC4,Gemeente"];
+  [...new Map(features.map(f => [f.attributes.PC4, f.attributes.GM_NAAM]))]
+    .forEach(([p,g]) => rows.push(`${p},${g}`));
+  const blob = new Blob([rows.join("\n")],{type:"text/csv"});
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "resultaat_pc4.csv";
+  a.click();
+};
 </script>
-
 </body>
 </html>
